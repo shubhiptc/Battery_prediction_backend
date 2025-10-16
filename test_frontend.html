@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Battery Capacity Prediction</title>
+    <style>
+        .container { max-width: 800px; margin: 50px auto; padding: 20px; }
+        .section { margin: 30px 0; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+        .button { padding: 10px 20px; margin: 10px 5px; cursor: pointer; }
+        .progress-bar { width: 100%; height: 30px; background: #f0f0f0; border-radius: 5px; overflow: hidden; }
+        .progress-fill { height: 100%; background: #4CAF50; transition: width 0.3s; }
+        .result { padding: 15px; margin: 10px 0; background: #e8f5e9; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔋 Battery Capacity Prediction System</h1>
+        
+        <!-- Section 1: Training -->
+        <div class="section">
+            <h2>📚 Training Section</h2>
+            
+            <div>
+                <h3>Step 1: Upload Training Data</h3>
+                <input type="file" id="trainingFiles" multiple accept=".csv">
+                <button class="button" onclick="uploadFiles()">Upload Files</button>
+                <div id="uploadStatus"></div>
+            </div>
+            
+            <div style="margin-top: 20px;">
+                <h3>Step 2: Select Model</h3>
+                <select id="modelSelect">
+                    <option value="">Loading models...</option>
+                </select>
+            </div>
+            
+            <div style="margin-top: 20px;">
+                <h3>Step 3: Train Model</h3>
+                <button class="button" onclick="startTraining()">🚀 Train Model</button>
+            </div>
+            
+            <div id="trainingProgress" style="display: none; margin-top: 20px;">
+                <h3>Training Progress</h3>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <p id="progressMessage"></p>
+            </div>
+            
+            <div id="trainingResults" style="display: none;"></div>
+        </div>
+        
+        <!-- Section 2: Prediction -->
+        <div class="section">
+            <h2>🔮 Prediction Section</h2>
+            
+            <div>
+                <h3>Upload Battery Data (NA File)</h3>
+                <input type="file" id="predictionFile" accept=".csv">
+                <button class="button" onclick="predictCapacity()">Predict</button>
+            </div>
+            
+            <div id="predictionResults" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+        
+        // Load available models on page load
+        window.onload = async () => {
+            const response = await fetch(`${API_URL}/available-models`);
+            const data = await response.json();
+            
+            const select = document.getElementById('modelSelect');
+            select.innerHTML = '<option value="">Select a model...</option>';
+            data.models.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model;
+                option.textContent = model;
+                select.appendChild(option);
+            });
+        };
+        
+        // Upload training files
+        async function uploadFiles() {
+            const fileInput = document.getElementById('trainingFiles');
+            const files = fileInput.files;
+            
+            if (files.length === 0) {
+                alert('Please select CSV files to upload');
+                return;
+            }
+            
+            const formData = new FormData();
+            for (let file of files) {
+                formData.append('files', file);
+            }
+            
+            try {
+                const response = await fetch(`${API_URL}/upload-training-data`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                document.getElementById('uploadStatus').innerHTML = `
+                    <div class="result">
+                        ✅ ${result.message}<br>
+                        Uploaded: ${result.uploaded_files.length} files
+                    </div>
+                `;
+            } catch (error) {
+                alert('Upload failed: ' + error.message);
+            }
+        }
+        
+        // Start training
+        async function startTraining() {
+            const modelSelect = document.getElementById('modelSelect');
+            const modelName = modelSelect.value;
+            
+            if (!modelName) {
+                alert('Please select a model');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_URL}/train`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model_name: modelName })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'started') {
+                    document.getElementById('trainingProgress').style.display = 'block';
+                    pollTrainingStatus();
+                }
+            } catch (error) {
+                alert('Training failed to start: ' + error.message);
+            }
+        }
+        
+        // Poll training status
+        async function pollTrainingStatus() {
+            const response = await fetch(`${API_URL}/training-status`);
+            const status = await response.json();
+            
+            // Update progress bar
+            document.getElementById('progressFill').style.width = `${status.progress}%`;
+            document.getElementById('progressMessage').textContent = status.message;
+            
+            if (status.is_training) {
+                setTimeout(pollTrainingStatus, 2000);
+            } else if (status.result) {
+                if (status.result.status === 'success') {
+                    displayTrainingResults(status.result);
+                } else {
+                    alert('Training failed: ' + status.result.message);
+                }
+            }
+        }
+        
+        // Display training results
+        function displayTrainingResults(result) {
+            document.getElementById('trainingResults').style.display = 'block';
+            document.getElementById('trainingResults').innerHTML = `
+                <div class="result">
+                    <h3>✅ Training Completed!</h3>
+                    <p><strong>Model:</strong> ${result.model_name}</p>
+                    <p><strong>Training Accuracy:</strong> ${result.train_accuracy}%</p>
+                    <p><strong>Testing Accuracy:</strong> ${result.test_accuracy}%</p>
+                    <p><strong>Training Time:</strong> ${result.training_time}</p>
+                    <p><strong>Model Saved:</strong> ${result.model_saved}</p>
+                </div>
+            `;
+        }
+        
+        // Predict capacity
+        async function predictCapacity() {
+            const fileInput = document.getElementById('predictionFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select a CSV file');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            try {
+                const response = await fetch(`${API_URL}/predict`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const prediction = await response.json();
+                
+                const sohStatus = prediction.soh >= 80 ? '🟢 Good' : 
+                                 prediction.soh >= 60 ? '🟡 Moderate' : '🔴 Poor';
+                
+                document.getElementById('predictionResults').style.display = 'block';
+                document.getElementById('predictionResults').innerHTML = `
+                    <div class="result">
+                        <h3>🔋 Prediction Results</h3>
+                        <p><strong>Predicted Capacity:</strong> ${prediction.capacity}</p>
+                        <p><strong>State of Health (SOH):</strong> ${prediction.soh}% ${sohStatus}</p>
+                        <p><strong>Confidence:</strong> ${prediction.confidence}%</p>
+                    </div>
+                `;
+            } catch (error) {
+                alert('Prediction failed: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>
